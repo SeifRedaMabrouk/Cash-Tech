@@ -1,0 +1,47 @@
+# Caddy: HTTPS تلقائي + تحويل http -> https + basicauth على الإدارة + rate limit على الـ API العامة.
+# rate_limit محتاج Caddy مبني بإضافة caddy-ratelimit:
+#   xcaddy build --with github.com/mholt/caddy-ratelimit
+# تنبيه: لو Cloudflare قدام السيرفر، {remote_host} هيبقى IP كلاودفلير مش الزائر. استخدم Rate Limiting Rules في Cloudflare بدل بلوكات rate_limit هنا.
+# لو مش عايز تبنيه، احذف بلوكات rate_limit واستخدم Rate Limiting Rules في Cloudflare بدلها.
+{
+	order rate_limit before basicauth
+}
+
+# أي حد يفتح بالـ IP يتحول للدومين الرسمي
+http:// {
+	redir https://your-domain.com{uri} permanent
+}
+
+www.your-domain.com {
+	redir https://your-domain.com{uri} permanent
+}
+
+your-domain.com {
+	encode gzip
+
+	# طبقة باسورد تانية قبل صفحة الدخول (اعمل الهاش بـ: caddy hash-password)
+	@admin path /admin /admin/* /api/admin/* /api/auth/*
+	basicauth @admin {
+		cashadmin $2a$14$REPLACE_WITH_OUTPUT_OF_caddy_hash-password
+	}
+
+	# حد الطلبات للـ API العامة لكل زائر
+	@public_api path /api/quote /api/checkout /api/catalog
+	rate_limit @public_api {
+		zone public_api {
+			key {remote_host}
+			events 60
+			window 1m
+		}
+	}
+	@auth path /api/auth/*
+	rate_limit @auth {
+		zone auth {
+			key {remote_host}
+			events 20
+			window 1m
+		}
+	}
+
+	reverse_proxy 127.0.0.1:3000
+}
